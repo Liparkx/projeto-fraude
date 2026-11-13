@@ -34,3 +34,7 @@ pip install -e .[dev]
 ## Status
 
 Phase 0 (project hygiene) done. Dataset is not downloaded yet.
+
+### Data preparation
+
+The raw dataset has 284,807 rows, of which 1,081 are exact duplicates (19 of them fraud). `load_data()` removes these duplicates by default, before the stratified 60/20/20 split, leaving 283,726 rows and 473 fraud cases (0.167%). Duplicates are removed first so that identical transactions cannot appear in both training and evaluation sets and inflate the metrics. Pass `drop_duplicates=False` to keep the original data.

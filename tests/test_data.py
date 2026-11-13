@@ -8,7 +8,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from fraud_detection.data import DEFAULT_DATA_PATH, TARGET_COLUMN, load_data, split_data
+from fraud_detection.data import (
+    DEFAULT_DATA_PATH,
+    TARGET_COLUMN,
+    drop_duplicate_rows,
+    load_data,
+    split_data,
+)
 
 
 def _make_synthetic_df(
@@ -109,9 +115,61 @@ def test_split_rejects_invalid_fractions(val_size: float, test_size: float) -> N
         split_data(_make_synthetic_df(), val_size=val_size, test_size=test_size)
 
 
+def test_drop_duplicate_rows_keeps_first_occurrence_and_resets_index() -> None:
+    df = pd.DataFrame(
+        {"Amount": [1.0, 2.0, 1.0, 3.0], TARGET_COLUMN: [0, 1, 0, 0]},
+        index=[10, 11, 12, 13],
+    )
+    out = drop_duplicate_rows(df)
+
+    assert out["Amount"].tolist() == [1.0, 2.0, 3.0]
+    assert out.index.tolist() == [0, 1, 2]
+
+
+def test_drop_duplicate_rows_does_not_mutate_input() -> None:
+    df = pd.DataFrame({"Amount": [1.0, 1.0], TARGET_COLUMN: [0, 0]})
+    before = df.copy()
+    drop_duplicate_rows(df)
+
+    pd.testing.assert_frame_equal(df, before)
+
+
+def test_drop_duplicate_rows_is_noop_without_duplicates() -> None:
+    df = _make_synthetic_df(n_rows=200).drop_duplicates().reset_index(drop=True)
+    pd.testing.assert_frame_equal(drop_duplicate_rows(df), df)
+
+
+def test_load_data_removes_duplicates_by_default(tmp_path: Path) -> None:
+    path = tmp_path / "com_duplicatas.csv"
+    pd.DataFrame({"Amount": [1.0, 1.0, 2.0], TARGET_COLUMN: [0, 0, 1]}).to_csv(path, index=False)
+
+    assert len(load_data(path)) == 2
+    assert len(load_data(path, drop_duplicates=False)) == 3
+
+
+def test_split_after_dedupe_has_no_feature_row_in_two_sets() -> None:
+    # Duplicatas injetadas de propósito: após a remoção, nenhuma linha
+    # pode aparecer em mais de um conjunto (teste anti-vazamento).
+    base = _make_synthetic_df(n_rows=1_000)
+    with_dups = pd.concat([base, base.iloc[:300]], ignore_index=True)
+    split = split_data(drop_duplicate_rows(with_dups))
+
+    combined = pd.concat([split.X_train, split.X_val, split.X_test])
+    assert not combined.duplicated().any()
+
+
 @pytest.mark.skipif(not DEFAULT_DATA_PATH.is_file(), reason="creditcard.csv não disponível")
 def test_real_dataset_shape_and_fraud_count() -> None:
     df = load_data()
+
+    # 284.807 linhas originais, 1.081 duplicatas removidas.
+    assert df.shape == (283_726, 31)
+    assert int(df[TARGET_COLUMN].sum()) == 473
+
+
+@pytest.mark.skipif(not DEFAULT_DATA_PATH.is_file(), reason="creditcard.csv não disponível")
+def test_real_dataset_without_dedupe_keeps_original_counts() -> None:
+    df = load_data(drop_duplicates=False)
 
     assert df.shape == (284_807, 31)
     assert int(df[TARGET_COLUMN].sum()) == 492
