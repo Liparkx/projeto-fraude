@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
 from sklearn.model_selection import train_test_split
+
+logger = logging.getLogger(__name__)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_DATA_PATH = PROJECT_ROOT / "data" / "raw" / "creditcard.csv"
@@ -27,8 +30,24 @@ class DataSplit:
     y_test: pd.Series
 
 
-def load_data(path: Path | str = DEFAULT_DATA_PATH) -> pd.DataFrame:
-    """Lê o CSV do ULB e valida a presença da coluna alvo.
+def drop_duplicate_rows(df: pd.DataFrame) -> pd.DataFrame:
+    """Remove linhas idênticas, mantendo a primeira ocorrência, e reinicia o índice.
+
+    Deve ser feito antes do split: duplicatas separadas entre treino e teste
+    inflam as métricas. Não altera o DataFrame de entrada.
+    """
+    return df.drop_duplicates(keep="first").reset_index(drop=True)
+
+
+def load_data(
+    path: Path | str = DEFAULT_DATA_PATH,
+    drop_duplicates: bool = True,
+) -> pd.DataFrame:
+    """Lê o CSV do ULB, valida a coluna alvo e, por padrão, remove duplicatas.
+
+    Args:
+        path: caminho do CSV.
+        drop_duplicates: se True, remove linhas duplicadas (ver ``drop_duplicate_rows``).
 
     Raises:
         FileNotFoundError: se o arquivo não existir.
@@ -47,6 +66,11 @@ def load_data(path: Path | str = DEFAULT_DATA_PATH) -> pd.DataFrame:
         raise ValueError(f"Coluna alvo '{TARGET_COLUMN}' ausente no dataset.")
     if not set(df[TARGET_COLUMN].unique()).issubset({0, 1}):
         raise ValueError(f"Coluna '{TARGET_COLUMN}' deve conter apenas 0 e 1.")
+
+    if drop_duplicates:
+        n_before = len(df)
+        df = drop_duplicate_rows(df)
+        logger.info("Duplicatas removidas: %d de %d linhas.", n_before - len(df), n_before)
 
     return df
 
