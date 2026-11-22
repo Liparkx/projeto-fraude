@@ -5,10 +5,11 @@ Registro do que foi feito em cada etapa, com os conceitos e erros encontrados. S
 ## Estado atual
 
 - Repositório: https://github.com/Liparkx/projeto-fraude (público)
-- Branch `main`: inclui o merge do PR #1 (`f1a6fbf`), com métricas e remoção de duplicatas.
-- Branch `feat/threshold-por-custo`: Passo 4 implementado; ainda não commitado.
-- Testes: 76 passando; `ruff check` e `ruff format --check` limpos.
-- Próxima etapa: Passo 5 (experimento com as 8 combinações).
+- Branch `main`: inclui os Passos 0 a 4, com os merges dos PRs #1 e #2 (`f8c9d53`).
+- Branch `feat/experimento-completo`: Passo 5 implementado e testado; PR a abrir.
+- Testes: 93 passando; `ruff check` e `ruff format --check` limpos.
+- Execução real do experimento no dataset completo: **pendente** (Passo 6).
+- Próxima etapa: Passo 6 (execução real, resultados e README), em branch nova criada após o merge do Passo 5.
 
 ## Passos concluídos
 
@@ -40,6 +41,23 @@ Registro do que foi feito em cada etapa, com os conceitos e erros encontrados. S
 - `sensitivity_analysis()`: uma linha por razão C_FN/C_FP (1, 5, 10, 50, 100, 500). Compara o limiar ótimo com o limiar 0,5 e com "não usar modelo" (`C_FN · P`). Se receber dados de avaliação, aplica o limiar da validação a eles sem reotimizar.
 - Custos são parâmetros; nada fica fixo no código.
 
+### Passo 5: experimento ponta a ponta (código e testes)
+- `metrics.py`: `pr_auc_bootstrap_ci()` estima um intervalo de confiança da PR-AUC por bootstrap. Serve para mostrar o ruído de uma validação com poucas fraudes (~94).
+- `experiment.py`: treina as 8 combinações só no treino e avalia cada uma na validação. Escolhe a de maior PR-AUC na validação e sinaliza se o intervalo dela se sobrepõe ao da segunda colocada. Usa o conjunto de teste **uma única vez**, só na combinação escolhida, com os limiares definidos na validação. Gera tabelas CSV, figuras e `models/best_model.joblib`. Executa com `python -m fraud_detection.experiment`.
+- `reporting.py`: três figuras em PNG: curvas Precisão-Recall (um painel por modelo), custo × limiar (um painel por razão de custo) e sensibilidade do custo.
+- Decisões: cada painel tem no máximo 4 séries, com cor fixa por estratégia, para ficar dentro da paleta de referência do skill `dataviz`.
+- Testes: 17 novos (6 do bootstrap, 11 do experimento e das figuras), com dados sintéticos. Um deles confere que o teste reaproveita os limiares da validação, sem reotimizá-los.
+- Status: **a execução no dataset real ainda não foi feita**. Tempo de execução, uso de memória e resultados ficam para o Passo 6.
+
+Conceitos novos:
+- **Intervalo bootstrap:** reamostrar as linhas com reposição e recalcular a métrica muitas vezes. A faixa de 95% mostra quanto o resultado oscila com os dados disponíveis.
+- **Uso único do teste:** o conjunto de teste só é lido depois que a combinação e os limiares estão fixados pela validação. Consultá-lo antes disso contamina a escolha.
+
+Ressalvas:
+- O validador de paleta `validate_palette.js` não rodou porque o Node.js não está instalado. Confiei na validação documentada na paleta de referência.
+- As cores aqua e amarela ficam abaixo de 3:1 de contraste sobre o fundo claro. Por isso cada figura tem a tabela CSV correspondente.
+- A comparação entre combinações usa só a validação, com cerca de 94 fraudes. Diferenças pequenas podem ser ruído.
+
 ### Remoção de duplicatas
 - O dataset tem 284.807 linhas, das quais 1.081 são duplicatas exatas (19 delas fraudes).
 - Após a remoção: 283.726 linhas e 473 fraudes (0,1667%).
@@ -56,6 +74,16 @@ Commits:
 
 Motivo de usar PR: documentar o aprendizado e revisar o diff antes do merge.
 
+### PR #2: `feat/threshold-por-custo` (mergeado)
+
+Commits:
+1. `b67e850`: adiciona `threshold.py` e `test_threshold.py`.
+2. `8d0427c`: atualiza o `PROGRESS.md`. O título do PR e a mensagem trazem o erro de digitação "threshould".
+
+Merge: `f8c9d53`.
+
+Branches locais já mergeadas podem ser apagadas: `feat/metricas-e-remocao-de-duplicatas` e `feat/threshold-por-custo`.
+
 ## Conceitos aprendidos
 
 - **Acurácia engana em dados desbalanceados.** Com 0,17% de fraude, um modelo que classifica tudo como legítimo acerta 99,83%.
@@ -71,9 +99,9 @@ Motivo de usar PR: documentar o aprendizado e revisar o diff antes do merge.
 
 - Nos testes de `metrics.py`, errei contas feitas à mão. O limiar de `recall_at_fpr` é o próprio score do ponto da curva (1.0, e não 0.95). No limiar 0.5, eram 6 falsos positivos, e não 5. O código estava certo; os testes não.
 - A validação rejeitava `target_fpr=0`, que é um caso válido (limiar acima de todos os legítimos). Corrigido para o intervalo [0, 1].
-- Nos commits, há erros de digitação nas mensagens: "Adicina", "duplicatras", "load-data" e "threshold" no corpo. Ainda não foram corrigidos.
+- Nos commits, há erros de digitação nas mensagens: "Adicina", "duplicatras", "load-data" e "threshould" no título do PR #2 e no commit `8d0427c`. Ainda não foram corrigidos; corrigir exige reescrever o histórico.
 
 ## Próximos passos
 
-- **Passo 5:** experimento completo com as 8 combinações, relatórios em `reports/` e modelo salvo em `models/`.
-- **Passo 6:** notebook de EDA e resultados no README.
+- **Passo 6:** executar o experimento no dataset real, conferir as saídas, rodar duas vezes para checar a reprodutibilidade e documentar os resultados no README.
+- **Passo 7:** notebook de EDA (`notebooks/`).
