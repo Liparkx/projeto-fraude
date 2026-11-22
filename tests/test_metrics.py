@@ -5,7 +5,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from fraud_detection.metrics import metrics_at_threshold, pr_auc, recall_at_fpr, roc_auc
+from fraud_detection.metrics import (
+    metrics_at_threshold,
+    pr_auc,
+    pr_auc_bootstrap_ci,
+    recall_at_fpr,
+    roc_auc,
+)
 
 # 10 negativos e 4 positivos. Os positivos e negativos se separam bem,
 # exceto por um negativo (1.0) acima de dois positivos (0.55 e 0.25).
@@ -99,3 +105,39 @@ def test_metrics_at_threshold_handles_no_positive_predictions() -> None:
     assert m.precision == 0.0
     assert m.recall == 0.0
     assert m.f1 == 0.0
+
+
+def _signal_data(n: int = 2_000, fraud_rate: float = 0.05, seed: int = 0):
+    rng = np.random.default_rng(seed)
+    y = (rng.random(n) < fraud_rate).astype(int)
+    s = rng.normal(size=n) + 1.5 * y
+    return y, s
+
+
+def test_pr_auc_bootstrap_ci_is_reproducible_with_same_seed() -> None:
+    y, s = _signal_data()
+
+    first = pr_auc_bootstrap_ci(y, s, n_boot=100, random_state=7)
+    second = pr_auc_bootstrap_ci(y, s, n_boot=100, random_state=7)
+
+    assert first == second
+
+
+def test_pr_auc_bootstrap_ci_contains_point_estimate() -> None:
+    y, s = _signal_data()
+    low, high = pr_auc_bootstrap_ci(y, s, n_boot=200, random_state=42)
+
+    assert low <= pr_auc(y, s) <= high
+    assert low < high
+
+
+def test_pr_auc_bootstrap_ci_requires_positive_examples() -> None:
+    with pytest.raises(ValueError, match="positivos"):
+        pr_auc_bootstrap_ci(np.zeros(50, dtype=int), np.linspace(0, 1, 50))
+
+
+@pytest.mark.parametrize("bad_confidence", [0.0, 1.0, 1.5])
+def test_pr_auc_bootstrap_ci_rejects_invalid_confidence(bad_confidence: float) -> None:
+    y, s = _signal_data()
+    with pytest.raises(ValueError, match="confidence"):
+        pr_auc_bootstrap_ci(y, s, confidence=bad_confidence)

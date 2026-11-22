@@ -54,6 +54,44 @@ def roc_auc(y_true: ArrayLike, y_score: ArrayLike) -> float:
     return float(roc_auc_score(y_true, y_score))
 
 
+def pr_auc_bootstrap_ci(
+    y_true: ArrayLike,
+    y_score: ArrayLike,
+    n_boot: int = 200,
+    confidence: float = 0.95,
+    random_state: int = 42,
+) -> tuple[float, float]:
+    """Intervalo de confiança da PR-AUC por bootstrap.
+
+    Reamostra as linhas com reposição e recalcula a PR-AUC. Reamostras sem nenhuma
+    fraude são descartadas. Serve para mostrar o ruído de conjuntos com poucas
+    fraudes, como a validação deste projeto (~94 casos).
+
+    Returns:
+        (limite inferior, limite superior) do intervalo.
+    """
+    if not 0 < confidence < 1:
+        raise ValueError("confidence deve estar em (0, 1).")
+
+    y = np.asarray(y_true).astype(int)
+    s = np.asarray(y_score, dtype=float)
+    if y.sum() == 0:
+        raise ValueError("y_true não contém positivos; o intervalo não é definido.")
+
+    rng = np.random.default_rng(random_state)
+    n = len(y)
+    stats: list[float] = []
+    while len(stats) < n_boot:
+        idx = rng.integers(0, n, n)
+        if y[idx].sum() == 0:
+            continue
+        stats.append(float(average_precision_score(y[idx], s[idx])))
+
+    alpha = (1 - confidence) / 2
+    low, high = np.quantile(stats, [alpha, 1 - alpha])
+    return float(low), float(high)
+
+
 def recall_at_fpr(y_true: ArrayLike, y_score: ArrayLike, target_fpr: float) -> OperatingPoint:
     """Maior recall possível mantendo a FPR menor ou igual a ``target_fpr``.
 
