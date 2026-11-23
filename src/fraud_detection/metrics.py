@@ -124,6 +124,50 @@ def recall_at_fpr(y_true: ArrayLike, y_score: ArrayLike, target_fpr: float) -> O
     )
 
 
+def recall_at_fpr_bootstrap_ci(
+    y_true: ArrayLike,
+    y_score: ArrayLike,
+    target_fpr: float,
+    n_boot: int = 200,
+    confidence: float = 0.95,
+    random_state: int = 42,
+) -> tuple[float, float]:
+    """Intervalo de confiança do recall a FPR fixa, por bootstrap.
+
+    Em cada reamostra o limiar é recalculado com ``recall_at_fpr``. Assim o intervalo
+    captura tanto o ruído dos dados quanto a instabilidade do limiar, que depende
+    dos k falsos positivos permitidos (k = FPR × legítimos).
+
+    Reamostras sem positivos ou sem negativos são descartadas.
+
+    Returns:
+        (limite inferior, limite superior) do intervalo.
+    """
+    if not 0 < confidence < 1:
+        raise ValueError("confidence deve estar em (0, 1).")
+    if not 0 <= target_fpr <= 1:
+        raise ValueError("target_fpr deve estar em [0, 1].")
+
+    y = np.asarray(y_true).astype(int)
+    s = np.asarray(y_score, dtype=float)
+    if y.sum() == 0 or y.sum() == len(y):
+        raise ValueError("y_true precisa conter positivos e negativos.")
+
+    rng = np.random.default_rng(random_state)
+    n = len(y)
+    stats: list[float] = []
+    while len(stats) < n_boot:
+        idx = rng.integers(0, n, n)
+        yb = y[idx]
+        if yb.sum() == 0 or yb.sum() == len(yb):
+            continue
+        stats.append(recall_at_fpr(yb, s[idx], target_fpr).recall)
+
+    alpha = (1 - confidence) / 2
+    low, high = np.quantile(stats, [alpha, 1 - alpha])
+    return float(low), float(high)
+
+
 def metrics_at_threshold(
     y_true: ArrayLike, y_score: ArrayLike, threshold: float
 ) -> ThresholdMetrics:

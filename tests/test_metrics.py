@@ -10,6 +10,7 @@ from fraud_detection.metrics import (
     pr_auc,
     pr_auc_bootstrap_ci,
     recall_at_fpr,
+    recall_at_fpr_bootstrap_ci,
     roc_auc,
 )
 
@@ -141,3 +142,39 @@ def test_pr_auc_bootstrap_ci_rejects_invalid_confidence(bad_confidence: float) -
     y, s = _signal_data()
     with pytest.raises(ValueError, match="confidence"):
         pr_auc_bootstrap_ci(y, s, confidence=bad_confidence)
+
+
+def test_recall_fpr_bootstrap_ci_is_reproducible_with_same_seed() -> None:
+    y, s = _signal_data()
+
+    first = recall_at_fpr_bootstrap_ci(y, s, target_fpr=0.01, n_boot=50, random_state=7)
+    second = recall_at_fpr_bootstrap_ci(y, s, target_fpr=0.01, n_boot=50, random_state=7)
+
+    assert first == second
+
+
+def test_recall_fpr_bootstrap_ci_is_within_unit_interval_and_ordered() -> None:
+    y, s = _signal_data()
+    low, high = recall_at_fpr_bootstrap_ci(y, s, target_fpr=0.05, n_boot=100)
+
+    assert 0.0 <= low <= high <= 1.0
+
+
+def test_recall_fpr_bootstrap_ci_contains_point_estimate() -> None:
+    y, s = _signal_data(n=4_000, fraud_rate=0.05, seed=3)
+    point = recall_at_fpr(y, s, target_fpr=0.05).recall
+    low, high = recall_at_fpr_bootstrap_ci(y, s, target_fpr=0.05, n_boot=200)
+
+    assert low <= point <= high
+
+
+def test_recall_fpr_bootstrap_ci_rejects_single_class() -> None:
+    with pytest.raises(ValueError, match="positivos e negativos"):
+        recall_at_fpr_bootstrap_ci(np.zeros(30, dtype=int), np.linspace(0, 1, 30), 0.01)
+
+
+@pytest.mark.parametrize(("kwargs"), [{"target_fpr": 1.5}, {"target_fpr": 0.01, "confidence": 1.0}])
+def test_recall_fpr_bootstrap_ci_rejects_invalid_arguments(kwargs: dict) -> None:
+    y, s = _signal_data()
+    with pytest.raises(ValueError):
+        recall_at_fpr_bootstrap_ci(y, s, **kwargs)

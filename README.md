@@ -31,9 +31,27 @@ pip install -e .[dev]
 
 `requirements-freeze.txt` is a full `pip freeze` of the original environment (UTF-16 encoded), kept for reference only.
 
+## How to run the experiment
+
+Place `creditcard.csv` in `data/raw/`, then run:
+
+```bash
+python -m fraud_detection.experiment
+```
+
+The script trains the 8 combinations (logistic regression and XGBoost × baseline, SMOTE, undersampling and class weights) on the training split, evaluates them on validation, and evaluates the selected combination once on the test split. Outputs:
+
+- `reports/tables/`: validation comparison, cost sensitivity and test results (CSV).
+- `reports/figures/`: Precision-Recall curves, recall at fixed FPR with bootstrap intervals, cost versus threshold, and cost sensitivity (PNG).
+- `models/best_model.joblib`: the fitted pipeline with its thresholds and metadata.
+
+On the development machine the run took about 48 seconds. The run is deterministic for a fixed `random_state`.
+
 ## Status
 
-Phase 0 (project hygiene) done. Dataset is not downloaded yet.
+- Phases 0 to 5 are done: setup, data preparation, metrics, cost-based threshold, and the experiment pipeline.
+- Phase 6 (real run of the experiment) is done. Results are recorded in `PROGRESS.md`.
+- Next: apply the class-weight model as the chosen combination, fix the operating threshold from business costs, and add the exploratory data analysis notebook.
 
 ### Data preparation
 
