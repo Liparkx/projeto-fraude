@@ -5,11 +5,11 @@ Registro do que foi feito em cada etapa, com os conceitos e erros encontrados. S
 ## Estado atual
 
 - Repositório: https://github.com/Liparkx/projeto-fraude (público)
-- Branch `main`: inclui os Passos 0 a 5, com os merges dos PRs #1, #2 e #3 (`33883df`).
-- Branch `feat/execucao-do-experimento`: Passo 6 (código do recall com IC, execução real, documentação). Alterações ainda não commitadas.
-- Testes: 104 passando; `ruff check` e `ruff format --check` limpos.
-- Execução real do experimento no dataset completo: **feita** (48 s, reprodutível); resultados na seção Passo 6.
-- Próxima etapa: aplicar `xgboost/class_weight` como vencedor (B1), depois threshold por custo (B2) e EDA (B3), cada um em PR próprio.
+- Branch `main`: inclui os Passos 0 a 6, com os merges dos PRs #1 a #4 (`eed3324`).
+- Branch `feat/threshold-custo-de-negocio`: B2 (custos de negócio e threshold fixado). Alterações ainda não commitadas.
+- Testes: 132 passando; `ruff check` e `ruff format --check` limpos.
+- Execução real do experimento: **feita** (49 s, reprodutível em duas execuções); resultados nas seções Passo 6 e B2.
+- Próxima etapa: EDA (B3), em branch própria.
 
 ## Passos concluídos
 
@@ -77,7 +77,7 @@ Ressalvas:
 - **F1 a 0,5 engana:** as estratégias com reamostragem têm F1 entre 0,05 e 0,10 com o limiar 0,5. Elas deslocam as probabilidades para cima, o que confirma que 0,5 não serve para comparar estratégias.
 - **Calibração:** o limiar ótimo empírico fica bem abaixo do limiar de Bayes teórico. Isso sugere que as probabilidades do XGBoost não estão bem calibradas.
 
-Decisão do usuário: `xgboost/class_weight` é o vencedor pela estabilidade. A decisão ainda não está aplicada no código; isso é o item B1.
+Decisão do usuário (revogada depois): tratar `xgboost/class_weight` como vencedor pela estabilidade. O usuário decidiu não declarar vencedor no projeto; ele indicará o melhor modelo no README ao final.
 
 Conceitos novos:
 - **Estabilidade da FPR fixa:** o limiar depende dos k falsos positivos permitidos (k = FPR × legítimos). Com 0,1% são ~57 falsos positivos (ruído de ~13% no limiar); com 1% são ~567 (ruído de ~4%).
@@ -88,11 +88,47 @@ Ressalvas:
 - A comparação usa só a validação, com cerca de 94 fraudes. Diferenças pequenas são ruído.
 - As figuras tiveram três problemas visuais corrigidos: a legenda do recall cobria a cor do SMOTE; a legenda das curvas PR estava sobre as curvas; e os rótulos do gráfico de custo colidiam.
 
+### B2: custos de negócio e threshold fixado
+- **Premissas de custo** (editáveis em `ExperimentConfig`; a moeda do dataset ULB não é informada, então a unidade é a "unidade monetária do dataset", provavelmente euro):
+  - C_FN = valor da transação + taxa fixa de fraude (25).
+  - C_FP = custo fixo de bloquear um legítimo (5).
+- **Código:** `threshold.py` passa a aceitar custos por linha (`transaction_cost_arrays`); `cost_curve` soma os custos com acumulados ponderados e devolve `fn_cost` e `fp_cost`; novas `near_optimal_range` (faixa com custo até 2% acima do mínimo) e `cost_scenario_sensitivity` (taxa fixa × C_FP). `experiment.py` calcula o custo em R$ das 8 combinações na validação, seleciona a de menor custo esperado, fixa o limiar ótimo e o aplica uma única vez ao teste.
+- **Validação, custo ótimo por combinação (R$):**
+
+| Combinação | Limiar ótimo | Faixa (≤ 2%) | Custo na validação | FN | FP |
+|---|---|---|---|---|---|
+| xgboost/baseline | 0,0032 | [0,0031; 0,0032] | **2.010** | 9 | 83 |
+| logistic/baseline | 0,0264 | [0,0202; 0,0294] | 2.177 | 10 | 49 |
+| logistic/class_weight | 0,9996 | [0,9982; 0,9996] | 2.241 | 13 | 26 |
+| logistic/smote | 0,9994 | [0,9985; 0,9994] | 2.251 | 13 | 28 |
+| xgboost/class_weight | 0,1612 | [0,0603; 0,7520] | 2.292 | 12 | 14 |
+| xgboost/smote | 0,6637 | [0,5427; 0,6637] | 2.313 | 13 | 13 |
+| xgboost/undersampling | 0,9941 | [0,9937; 0,9942] | 3.817 | 16 | 273 |
+| logistic/undersampling | 0,9962 | [0,9952; 0,9962] | 4.507 | 24 | 134 |
+
+- **Limiar fixado: 0,0032** (xgboost/baseline, menor custo esperado na validação; faixa [0,0031; 0,0032]).
+- **Teste, uma única vez, com o limiar 0,0032:**
+  - Custo: R$ 4.071,76. Com limiar 0,5: R$ 5.524,73. Sem modelo: R$ 17.141,31. Economia de R$ 13.069,55 (76% do custo sem modelo).
+  - FN 14, FP 80, TP 81; recall 0,853, precisão 0,503, FPR 0,141%.
+- **Sensibilidade aos custos** (limiar ótimo na validação, por taxa fixa de fraude e C_FP):
+  - Taxa 0 ou 25, C_FP 1 ou 5: limiar 0,0032.
+  - Taxa 25, C_FP 20: limiar 0,0413. Taxa 0, C_FP 20 ou 50: limiar 0,2979.
+  - Taxa 100, C_FP 20: limiar 0,0413. Faixa e limiar mudam bastante com os custos, então o limiar depende das premissas.
+- **Conceitos:**
+  - Com custo por valor, o limiar depende da distribuição dos valores das fraudes. Fraudes pequenas pesam pouco, e o modelo tolera deixá-las passar (mediana de Amount nas fraudes: 9,82).
+  - A curva de custo é plana acima do mínimo. Por isso a faixa quase-ótima é a medida honesta da incerteza.
+  - O limiar 0,0032 bloqueia cerca de 0,14% dos legítimos. Muito abaixo de 0,5, como esperado para probabilidades não calibradas.
+- **Ressalvas:**
+  - Os custos (25 e 5) são premissas, não dados. O threshold depende deles, por isso a sensibilidade por cenário.
+  - **O custo no teste (R$ 4.072) é o dobro do custo na validação (R$ 2.010).** Os FN sobem de 9 para 14, e o custo é dominado por poucas fraudes de valor alto. Com ~94 fraudes na validação, a estimativa de custo tem variância alta.
+  - A faixa quase-ótima é estreita para xgboost/baseline (0,0031 a 0,0032). Isso não significa precisão; significa que a curva sobe rápido de um lado do mínimo.
+  - As 8 combinações têm calibrações diferentes, então os limiares não são comparáveis entre si. Só os custos são.
+
 ### Status dos entregáveis
 1. **Tratamento do desbalanceamento:** feito (4 estratégias, 8 combinações, dataset real).
 2. **Análise exploratória:** pendente (B3; `notebooks/` só tem `.gitkeep`).
 3. **PR-AUC e recall a FPR fixa:** feito (8 combinações, IC bootstrap, teste usado uma vez).
-4. **Threshold por custo:** parcial. O mecanismo está pronto e testado. Falta definir custos de negócio, fixar o threshold do modelo final e avaliá-lo no teste (B2).
+4. **Threshold por custo:** feito, com custos premissas (B2). O limiar fixado na validação é 0,0032 e foi avaliado no teste uma única vez.
 
 ### Remoção de duplicatas
 - O dataset tem 284.807 linhas, das quais 1.081 são duplicatas exatas (19 delas fraudes).
@@ -129,6 +165,15 @@ Commits:
 
 Merge: `33883df`.
 
+### PR #4: `feat/execucao-do-experimento` (mergeado)
+
+Commits:
+1. `fc9fa83`: adiciona o intervalo bootstrap para o recall a FPR fixa.
+2. `695ecf5`: adiciona rankings, recall a FPR fixa e nova figura ao experimento.
+3. `e755265`: documenta a execução real do Passo 6.
+
+Merge: `eed3324`.
+
 ## Conceitos aprendidos
 
 - **Acurácia engana em dados desbalanceados.** Com 0,17% de fraude, um modelo que classifica tudo como legítimo acerta 99,83%.
@@ -148,6 +193,5 @@ Merge: `33883df`.
 
 ## Próximos passos
 
-- **B1 — Aplicar `xgboost/class_weight` como vencedor:** seleção por configuração (a decisão sobrepõe o ranking por PR-AUC), teste executado para esse modelo, `best_model.joblib` com o modelo certo, reexecução e checagem de reprodutibilidade.
 - **B2 — Threshold por custo:** com custos de negócio definidos, fixar o threshold do modelo final na validação (mínimo exato, com faixa quase-ótima reportada), avaliar no teste só com esse limiar e salvar o threshold e o cenário de custos no modelo.
 - **B3 — EDA:** notebook em `notebooks/` (distribuições de `Amount` e `Time`, fraude × legítimo, nulos, correlações), sem lógica de produção.
