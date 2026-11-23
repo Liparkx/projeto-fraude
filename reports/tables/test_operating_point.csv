@@ -1,0 +1,2 @@
+model,strategy,threshold,range_low,range_high,val_cost,test_cost,test_cost_default,test_cost_no_model,test_savings_vs_no_model,test_tp,test_fp,test_tn,test_fn,test_recall,test_precision,test_fpr
+xgboost,baseline,0.0032410905696451664,0.003087000921368599,0.0032410905696451664,2009.75,4071.76,5524.73,17141.31,13069.550000000001,81,80,56571,14,0.8526315789473684,0.5031055900621118,0.0014121551252405076

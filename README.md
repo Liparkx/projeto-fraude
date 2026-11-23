@@ -41,17 +41,21 @@ python -m fraud_detection.experiment
 
 The script trains the 8 combinations (logistic regression and XGBoost × baseline, SMOTE, undersampling and class weights) on the training split, evaluates them on validation, and evaluates the selected combination once on the test split. Outputs:
 
-- `reports/tables/`: validation comparison, cost sensitivity and test results (CSV).
-- `reports/figures/`: Precision-Recall curves, recall at fixed FPR with bootstrap intervals, cost versus threshold, and cost sensitivity (PNG).
-- `models/best_model.joblib`: the fitted pipeline with its thresholds and metadata.
+- `reports/tables/`: validation comparison, cost by model, cost scenarios, the operating point on test, and sensitivity tables (CSV).
+- `reports/figures/`: Precision-Recall curves, recall at fixed FPR with bootstrap intervals, cost curves, cost by model, and threshold sensitivity to costs (PNG).
+- `models/best_model.joblib`: the fitted pipeline with the operating threshold and its metadata.
 
 On the development machine the run took about 48 seconds. The run is deterministic for a fixed `random_state`.
 
+### Business costs
+
+The experiment chooses the operating threshold by business cost: `C_FN` is the transaction amount plus a fixed fraud cost, and `C_FP` is a fixed cost for blocking a legitimate transaction. The values are **assumptions, not data**, and they live in `ExperimentConfig` (`fraud_fixed_cost=25`, `fp_cost=5`, in the dataset's monetary unit). The threshold is chosen on the validation split, fixed, and applied once to the test split. Cost sensitivity across scenarios is reported in `reports/tables/cost_scenarios.csv`.
+
 ## Status
 
-- Phases 0 to 5 are done: setup, data preparation, metrics, cost-based threshold, and the experiment pipeline.
-- Phase 6 (real run of the experiment) is done. Results are recorded in `PROGRESS.md`.
-- Next: apply the class-weight model as the chosen combination, fix the operating threshold from business costs, and add the exploratory data analysis notebook.
+- Phases 0 to 6 are done: setup, data preparation, metrics, the experiment pipeline, and its real run.
+- The operating threshold is fixed from business costs (see `PROGRESS.md`, section B2).
+- Next: exploratory data analysis notebook. The best model will be declared in this README at the end of the project.
 
 ### Data preparation
 
