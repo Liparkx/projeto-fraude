@@ -185,13 +185,3 @@ Merge: `eed3324`.
 - **Limiar de Bayes:** para probabilidades calibradas, o custo mínimo está no limiar `C_FP / (C_FP + C_FN)`. Com C_FN = 100·C_FP, o limiar cai para ~0,0099, bem abaixo de 0,5. Por isso o 0,5 mede calibração, e não custo.
 - **Empate no limiar:** com custos iguais, dois limiares podem dar o mesmo custo. Escolher o maior evita bloqueios desnecessários.
 
-## Erros e correções
-
-- Nos testes de `metrics.py`, errei contas feitas à mão. O limiar de `recall_at_fpr` é o próprio score do ponto da curva (1.0, e não 0.95). No limiar 0.5, eram 6 falsos positivos, e não 5. O código estava certo; os testes não.
-- A validação rejeitava `target_fpr=0`, que é um caso válido (limiar acima de todos os legítimos). Corrigido para o intervalo [0, 1].
-- Nos commits, há erros de digitação nas mensagens: "Adicina", "duplicatras", "load-data" e "threshould" no título do PR #2 e no commit `8d0427c`. Ainda não foram corrigidos; corrigir exige reescrever o histórico.
-
-## Próximos passos
-
-- **B2 — Threshold por custo:** com custos de negócio definidos, fixar o threshold do modelo final na validação (mínimo exato, com faixa quase-ótima reportada), avaliar no teste só com esse limiar e salvar o threshold e o cenário de custos no modelo.
-- **B3 — EDA:** notebook em `notebooks/` (distribuições de `Amount` e `Time`, fraude × legítimo, nulos, correlações), sem lógica de produção.
