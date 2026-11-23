@@ -9,10 +9,13 @@ import pandas as pd
 
 from fraud_detection.models import MODEL_NAMES, SAMPLING_STRATEGIES
 from fraud_detection.reporting import (
+    plot_cost_by_model,
     plot_cost_curves,
+    plot_operating_cost_curve,
     plot_pr_curves,
     plot_recall_at_fpr,
     plot_sensitivity_summary,
+    plot_threshold_by_fp_cost,
     save_figures,
 )
 
@@ -112,3 +115,57 @@ def test_save_figures_returns_four_existing_paths(tmp_path: Path) -> None:
 
     assert len(paths) == 4
     assert all(p.is_file() for p in paths)
+
+
+def test_operating_cost_curve_figure_is_written(tmp_path: Path) -> None:
+    y, scores = _data()
+    rng = np.random.default_rng(3)
+    amounts = rng.exponential(80, len(y))
+    c_fn = amounts + 25.0
+    c_fp = np.full(len(y), 5.0)
+    path = plot_operating_cost_curve(
+        y,
+        scores["xgboost/smote"],
+        c_fn,
+        c_fp,
+        threshold=0.4,
+        range_low=0.3,
+        range_high=0.5,
+        default_threshold=0.5,
+        path=tmp_path / "operating.png",
+    )
+
+    assert path.is_file() and path.stat().st_size > 0
+
+
+def test_cost_by_model_figure_is_written(tmp_path: Path) -> None:
+    rows = []
+    for i, m in enumerate(MODEL_NAMES):
+        for j, s in enumerate(SAMPLING_STRATEGIES):
+            rows.append(
+                {
+                    "model": m,
+                    "strategy": s,
+                    "val_cost": 1000.0 + 37.0 * (i * 4 + j),
+                    "threshold": 0.1,
+                    "range_low": 0.05,
+                    "range_high": 0.2,
+                    "val_fn": 3,
+                    "val_fp": 40,
+                    "selected": (i == 1 and j == 0),
+                }
+            )
+    path = plot_cost_by_model(pd.DataFrame(rows), tmp_path / "cost_by_model.png")
+
+    assert path.is_file() and path.stat().st_size > 0
+
+
+def test_threshold_by_fp_cost_figure_is_written(tmp_path: Path) -> None:
+    rows = [
+        {"fraud_fixed_cost": ff, "fp_cost": fp, "threshold": 0.5 / (1 + fp * ff / 100 + 1)}
+        for ff in (0.0, 25.0, 100.0)
+        for fp in (1.0, 5.0, 20.0, 50.0)
+    ]
+    path = plot_threshold_by_fp_cost(pd.DataFrame(rows), tmp_path / "threshold_fp.png")
+
+    assert path.is_file() and path.stat().st_size > 0

@@ -25,7 +25,11 @@ from numpy.typing import ArrayLike  # noqa: E402
 from sklearn.metrics import precision_recall_curve  # noqa: E402
 
 from fraud_detection.models import MODEL_NAMES, SAMPLING_STRATEGIES  # noqa: E402
-from fraud_detection.threshold import best_threshold, cost_curve  # noqa: E402
+from fraud_detection.threshold import (  # noqa: E402
+    best_threshold,
+    cost_at_threshold,
+    cost_curve,
+)
 
 # Tokens de cor da paleta de referência (modo claro).
 SURFACE = "#fcfcfb"
@@ -284,6 +288,123 @@ def plot_recall_at_fpr(
     handles, labels = axes[0][0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=len(labels), frameon=False, fontsize=9)
     fig.suptitle("Recall a FPR fixa com IC 95% (bootstrap)", color=INK_PRIMARY, fontsize=13)
+    return _save(fig, path)
+
+
+def plot_operating_cost_curve(
+    y_val: ArrayLike,
+    scores: ArrayLike,
+    c_fn: ArrayLike,
+    c_fp: ArrayLike,
+    threshold: float,
+    range_low: float,
+    range_high: float,
+    default_threshold: float,
+    path: Path,
+) -> Path:
+    """Custo de negócio em R$ × limiar, com o limiar fixado, a faixa quase-ótima e o 0,5.
+
+    Escala log no eixo do limiar. O candidato ``inf`` (nenhum bloqueio) fica de fora.
+    """
+    curve = cost_curve(y_val, scores, c_fn, c_fp)
+    finite = curve[np.isfinite(curve["threshold"]) & (curve["threshold"] > 0)]
+
+    fig, axes = _new_figure(figsize=(8, 5))
+    ax = axes[0, 0]
+    ax.plot(finite["threshold"], finite["cost"], color=BLUE, linewidth=1.6)
+
+    if range_low > 0 and np.isfinite(range_high):
+        ax.axvspan(range_low, range_high, color=BLUE, alpha=0.12, label="Faixa quase-ótima")
+    ax.axvline(
+        default_threshold, color=INK_MUTED, linewidth=0.9, label=f"Limiar {default_threshold}"
+    )
+    if threshold > 0 and np.isfinite(threshold):
+        cost_opt = cost_at_threshold(y_val, scores, threshold, c_fn, c_fp)
+        ax.scatter([threshold], [cost_opt], s=40, color=BLUE, zorder=3, label="Limiar fixado")
+        ax.annotate(
+            f"{threshold:.4f}",
+            xy=(threshold, cost_opt),
+            xytext=(6, 8),
+            textcoords="offset points",
+            color=INK_PRIMARY,
+            fontsize=9,
+        )
+
+    ax.set_xscale("log")
+    ax.set_xlabel("Limiar (escala log)")
+    ax.set_ylabel("Custo de negócio (unidade monetária)")
+    ax.set_title("Custo × limiar na validação, combinação escolhida", fontsize=11)
+    ax.legend(frameon=False, fontsize=9, loc="upper left")
+    _style(ax)
+    return _save(fig, path)
+
+
+def plot_cost_by_model(cost_table: pd.DataFrame, path: Path) -> Path:
+    """Custo de negócio no limiar ótimo de cada combinação, na validação.
+
+    Barras coloridas pela estratégia (cor fixa). A combinação escolhida tem contorno.
+    """
+    table = cost_table.sort_values("val_cost", ascending=True).reset_index(drop=True)
+    fig, axes = _new_figure(figsize=(10, 5))
+    ax = axes[0, 0]
+
+    xs = np.arange(len(table))
+    colors = [STRATEGY_COLORS[s] for s in table["strategy"]]
+    edges = [INK_PRIMARY if sel else "none" for sel in table["selected"]]
+    ax.bar(xs, table["val_cost"], color=colors, edgecolor=edges, linewidth=1.5)
+    for x, cost in zip(xs, table["val_cost"], strict=True):
+        ax.text(x, cost, f"{cost:,.0f}", ha="center", va="bottom", fontsize=8, color=INK_PRIMARY)
+
+    ax.set_xticks(xs)
+    ax.set_xticklabels(
+        [
+            f"{MODEL_LABELS[m]}\n{STRATEGY_LABELS[s]}"
+            for m, s in zip(table["model"], table["strategy"], strict=True)
+        ],
+        fontsize=8,
+        rotation=30,
+        ha="right",
+    )
+    ax.set_ylabel("Custo de negócio na validação")
+    ax.set_title("Custo ótimo por combinação (contorno: escolhida)", fontsize=11)
+    handles = [
+        plt.Rectangle((0, 0), 1, 1, color=STRATEGY_COLORS[s], label=STRATEGY_LABELS[s])
+        for s in SAMPLING_STRATEGIES
+    ]
+    # Legenda no canto superior esquerdo: as barras mais baratas (à esquerda) são baixas.
+    ax.legend(handles=handles, frameon=False, fontsize=9, loc="upper left")
+    _style(ax)
+    return _save(fig, path)
+
+
+def plot_threshold_by_fp_cost(cost_scenarios: pd.DataFrame, path: Path) -> Path:
+    """Limiar ótimo em função do custo de FP, uma linha por taxa fixa de fraude."""
+    fig, axes = _new_figure(figsize=(8, 5))
+    ax = axes[0, 0]
+    colors = [BLUE, ORANGE, AQUA, YELLOW]
+
+    for color, fixed in zip(
+        colors, sorted(cost_scenarios["fraud_fixed_cost"].unique()), strict=False
+    ):
+        sub = cost_scenarios[cost_scenarios["fraud_fixed_cost"] == fixed].sort_values("fp_cost")
+        sub = sub[sub["threshold"] > 0]
+        ax.plot(
+            sub["fp_cost"],
+            sub["threshold"],
+            "o-",
+            color=color,
+            linewidth=1.8,
+            markersize=6,
+            label=f"Taxa fixa de fraude = {fixed:g}",
+        )
+
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xlabel("Custo de bloquear um legítimo (C_FP, escala log)")
+    ax.set_ylabel("Limiar ótimo (escala log)")
+    ax.set_title("Sensibilidade do limiar ótimo aos custos de negócio", fontsize=11)
+    ax.legend(frameon=False, fontsize=9)
+    _style(ax)
     return _save(fig, path)
 
 
