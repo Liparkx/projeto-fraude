@@ -123,7 +123,7 @@ def plot_pr_curves(
         ax.set_xlabel("Recall")
         ax.set_ylabel("Precisão")
         ax.set_title(f"{MODEL_LABELS[model_name]}: validação", fontsize=11)
-        ax.legend(frameon=False, fontsize=9, loc="upper right")
+        ax.legend(frameon=False, fontsize=9, loc="lower left")
         _style(ax)
 
     fig.suptitle("Curvas Precisão-Recall por estratégia", color=INK_PRIMARY, fontsize=13)
@@ -173,6 +173,8 @@ def plot_cost_curves(
     for ax in axes.flat[n:]:
         ax.set_visible(False)
 
+    # Evita que o rótulo do eixo x de uma linha colida com os títulos da linha de baixo.
+    fig.tight_layout(rect=(0, 0, 1, 0.94))
     fig.suptitle(
         f"Custo × limiar na validação (linha cinza: limiar {default_threshold})",
         color=INK_PRIMARY,
@@ -224,18 +226,81 @@ def plot_sensitivity_summary(sensitivity: pd.DataFrame, path: Path) -> Path:
     return _save(fig, path)
 
 
+def plot_recall_at_fpr(
+    validation_comparison: pd.DataFrame,
+    fpr_targets: Sequence[float],
+    path: Path,
+) -> Path:
+    """Recall a FPR fixa por combinação, com intervalo bootstrap de 95%.
+
+    Um painel por FPR alvo. Barras agrupadas por modelo e coloridas pela estratégia,
+    com barras de erro do intervalo. A FPR de 0,1% é indicativa: o limiar usa só
+    algumas dezenas de falsos positivos permitidos, então o intervalo é largo.
+    """
+    fig, axes = _new_figure(1, len(fpr_targets), figsize=(6 * len(fpr_targets), 5))
+    strategies = list(SAMPLING_STRATEGIES)
+    width = 0.8 / len(strategies)
+
+    for ax, fpr in zip(axes[0], fpr_targets, strict=True):
+        label = f"{fpr * 100:g}pct"
+        for j, strategy in enumerate(strategies):
+            values, lows, highs, xs = [], [], [], []
+            for i, model_name in enumerate(MODEL_NAMES):
+                row = validation_comparison[
+                    (validation_comparison["model"] == model_name)
+                    & (validation_comparison["strategy"] == strategy)
+                ].iloc[0]
+                value = float(row[f"recall_{label}"])
+                values.append(value)
+                lows.append(value - float(row[f"recall_{label}_ci_low"]))
+                highs.append(float(row[f"recall_{label}_ci_high"]) - value)
+                xs.append(i + (j - (len(strategies) - 1) / 2) * width)
+            ax.bar(
+                xs,
+                values,
+                width=width * 0.9,
+                color=STRATEGY_COLORS[strategy],
+                label=STRATEGY_LABELS[strategy],
+            )
+            ax.errorbar(
+                xs,
+                values,
+                yerr=[lows, highs],
+                fmt="none",
+                ecolor=INK_PRIMARY,
+                elinewidth=0.9,
+                capsize=3,
+            )
+
+        ax.set_xticks(range(len(MODEL_NAMES)))
+        ax.set_xticklabels([MODEL_LABELS[m] for m in MODEL_NAMES])
+        ax.set_ylim(0, 1.05)
+        ax.set_ylabel("Recall")
+        ax.set_title(f"Recall com FPR fixa de {fpr * 100:g}% (validação)", fontsize=11)
+        _style(ax)
+
+    # Legenda única abaixo dos painéis: sobre as barras ela cobria a cor do SMOTE.
+    fig.tight_layout(rect=(0, 0.08, 1, 0.94))
+    handles, labels = axes[0][0].get_legend_handles_labels()
+    fig.legend(handles, labels, loc="lower center", ncol=len(labels), frameon=False, fontsize=9)
+    fig.suptitle("Recall a FPR fixa com IC 95% (bootstrap)", color=INK_PRIMARY, fontsize=13)
+    return _save(fig, path)
+
+
 def save_figures(
     figures_dir: Path,
     y_val: ArrayLike,
     val_scores: dict[str, np.ndarray],
     validation_sensitivity: pd.DataFrame,
+    validation_comparison: pd.DataFrame,
+    fpr_targets: Sequence[float],
     best_label: str,
     best_val_scores: np.ndarray,
     cost_ratios: Sequence[float],
     c_fp: float,
     default_threshold: float,
 ) -> list[Path]:
-    """Gera as três figuras do experimento e devolve os caminhos."""
+    """Gera as quatro figuras do experimento e devolve os caminhos."""
     model_name, strategy = best_label.split("/")
     best_sens = validation_sensitivity[
         (validation_sensitivity["model"] == model_name)
@@ -244,6 +309,11 @@ def save_figures(
 
     return [
         plot_pr_curves(y_val, val_scores, figures_dir / "pr_curves_validation.png"),
+        plot_recall_at_fpr(
+            validation_comparison,
+            fpr_targets,
+            figures_dir / "recall_em_fpr_fixa_validacao.png",
+        ),
         plot_cost_curves(
             y_val,
             best_val_scores,

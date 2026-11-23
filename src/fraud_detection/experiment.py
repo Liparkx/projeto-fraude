@@ -35,6 +35,7 @@ from fraud_detection.metrics import (
     pr_auc,
     pr_auc_bootstrap_ci,
     recall_at_fpr,
+    recall_at_fpr_bootstrap_ci,
     roc_auc,
 )
 from fraud_detection.models import MODEL_NAMES, SAMPLING_STRATEGIES, build_pipeline
@@ -55,6 +56,8 @@ class ExperimentConfig:
     val_size: float = 0.2
     test_size: float = 0.2
     fpr_targets: tuple[float, ...] = (0.001, 0.01)
+    # FPR principal: indicativa (~57 falsos positivos permitidos na validação).
+    primary_fpr: float = 0.001
     cost_ratios: tuple[float, ...] = DEFAULT_COST_RATIOS
     c_fp: float = 1.0
     default_threshold: float = DEFAULT_THRESHOLD
@@ -72,6 +75,8 @@ class ExperimentResults:
     best_model: str
     best_strategy: str
     ci_overlap: bool
+    best_by_recall: tuple[str, str]
+    rankings_disagree: bool
     y_val: np.ndarray
     val_scores: dict[str, np.ndarray] = field(default_factory=dict)
     pipeline: object | None = None
@@ -104,7 +109,12 @@ def _validation_row(
     for fpr in config.fpr_targets:
         op = recall_at_fpr(y, s, fpr)
         label = _fpr_label(fpr)
+        r_low, r_high = recall_at_fpr_bootstrap_ci(
+            y, s, fpr, n_boot=config.n_bootstrap, random_state=config.random_state
+        )
         row[f"recall_{label}"] = op.recall
+        row[f"recall_{label}_ci_low"] = r_low
+        row[f"recall_{label}_ci_high"] = r_high
         row[f"threshold_{label}"] = op.threshold
         row[f"fpr_{label}"] = op.fpr
 
@@ -158,6 +168,8 @@ def run_experiment(
         save: se True, grava tabelas, figuras e o modelo em disco.
     """
     config = config or ExperimentConfig()
+    if config.primary_fpr not in config.fpr_targets:
+        raise ValueError("primary_fpr deve estar em fpr_targets.")
 
     if df is None:
         df = load_data(config.data_path)
@@ -217,6 +229,25 @@ def run_experiment(
             _combo_label(second["model"], second["strategy"]),
         )
 
+    # Ranking pelo recall na FPR principal, com desempate pela PR-AUC. Se o
+    # vencedor por recall for outra combinação, os critérios discordam: sinalizar.
+    primary_col = f"recall_{_fpr_label(config.primary_fpr)}"
+    by_recall = comparison.sort_values(
+        [primary_col, "pr_auc"], ascending=False, kind="stable"
+    ).iloc[0]
+    best_by_recall = (str(by_recall["model"]), str(by_recall["strategy"]))
+    rankings_disagree = best_by_recall != (str(best["model"]), str(best["strategy"]))
+    comparison["rank_pr_auc"] = comparison["pr_auc"].rank(ascending=False, method="min").astype(int)
+    comparison[f"rank_{primary_col}"] = (
+        comparison[primary_col].rank(ascending=False, method="min").astype(int)
+    )
+    if rankings_disagree:
+        logger.warning(
+            "Maior recall na FPR principal (%s) é %s/%s, diferente da escolha por PR-AUC.",
+            _fpr_label(config.primary_fpr),
+            *best_by_recall,
+        )
+
     best_name, best_strategy = str(best["model"]), str(best["strategy"])
     best_label = _combo_label(best_name, best_strategy)
     best_pipe = fitted[best_label]
@@ -258,6 +289,8 @@ def run_experiment(
         best_model=best_name,
         best_strategy=best_strategy,
         ci_overlap=ci_overlap,
+        best_by_recall=best_by_recall,
+        rankings_disagree=rankings_disagree,
         y_val=y_val,
         val_scores=val_scores,
         pipeline=best_pipe,
@@ -293,6 +326,8 @@ def _save_outputs(
         y_val=results.y_val,
         val_scores=results.val_scores,
         validation_sensitivity=results.validation_sensitivity,
+        validation_comparison=results.validation_comparison,
+        fpr_targets=config.fpr_targets,
         best_label=_combo_label(results.best_model, results.best_strategy),
         best_val_scores=s_val_best,
         cost_ratios=config.cost_ratios,
@@ -328,22 +363,48 @@ def _save_outputs(
 
 
 def main() -> None:
-    """Ponto de entrada: executa o experimento e imprime um resumo curto."""
+    """Ponto de entrada: executa o experimento e imprime um resumo curto (sem DataFrames)."""
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
-    results = run_experiment()
+    config = ExperimentConfig()
+    results = run_experiment(config)
 
-    best_row = results.validation_comparison.set_index(["model", "strategy"]).loc[
-        (results.best_model, results.best_strategy)
-    ]
+    indexed = results.validation_comparison.set_index(["model", "strategy"])
+    chosen = indexed.loc[(results.best_model, results.best_strategy)]
+    by_recall = indexed.loc[results.best_by_recall]
     test_row = results.test_results.iloc[0]
-    print(f"Melhor combinação (validação): {results.best_model}/{results.best_strategy}")
+
+    print(f"Escolhida pela PR-AUC (validação): {results.best_model}/{results.best_strategy}")
     print(
-        f"  PR-AUC validação: {best_row['pr_auc']:.4f} "
-        f"[IC95%: {best_row['pr_auc_ci_low']:.4f}; {best_row['pr_auc_ci_high']:.4f}]"
+        f"  PR-AUC: {chosen['pr_auc']:.4f} "
+        f"[IC95%: {chosen['pr_auc_ci_low']:.4f}; {chosen['pr_auc_ci_high']:.4f}]"
     )
-    print(f"  Intervalos sobrepostos com a segunda colocada: {results.ci_overlap}")
-    print(f"  PR-AUC teste: {test_row['pr_auc']:.4f}")
-    print(f"  Arquivos gerados: {len(results.output_files)} em reports/ e models/")
+    print(f"  Intervalo sobreposto com a segunda colocada: {results.ci_overlap}")
+
+    for fpr in config.fpr_targets:
+        label = _fpr_label(fpr)
+        print(f"Recall a FPR {label} (validação):")
+        print(
+            f"  escolhida: {chosen[f'recall_{label}']:.4f} "
+            f"[IC95%: {chosen[f'recall_{label}_ci_low']:.4f}; "
+            f"{chosen[f'recall_{label}_ci_high']:.4f}] "
+            f"limiar {chosen[f'threshold_{label}']:.4f}"
+        )
+        print(
+            f"  maior recall ({results.best_by_recall[0]}/{results.best_by_recall[1]}): "
+            f"{by_recall[f'recall_{label}']:.4f}"
+        )
+
+    print(f"Rankings discordam (PR-AUC x recall na FPR principal): {results.rankings_disagree}")
+
+    print("Teste (uma vez, limiares da validação):")
+    for fpr in config.fpr_targets:
+        label = _fpr_label(fpr)
+        print(
+            f"  FPR alvo {label}: recall {test_row[f'recall_{label}']:.4f}, "
+            f"FPR realizada {test_row[f'fpr_{label}']:.4%}"
+        )
+    print(f"  PR-AUC: {test_row['pr_auc']:.4f}")
+    print(f"Arquivos gerados: {len(results.output_files)} em reports/ e models/")
 
 
 if __name__ == "__main__":

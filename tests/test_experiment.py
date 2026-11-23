@@ -75,6 +75,40 @@ def test_best_model_has_highest_validation_pr_auc(results) -> None:
     assert isinstance(results.ci_overlap, bool)
 
 
+@pytest.mark.parametrize("label", ["0.1pct", "1pct"])
+def test_recall_at_fpr_has_ordered_bootstrap_interval_in_unit_range(results, label) -> None:
+    table = results.validation_comparison
+    value = table[f"recall_{label}"]
+    low = table[f"recall_{label}_ci_low"]
+    high = table[f"recall_{label}_ci_high"]
+
+    assert ((low >= 0) & (high <= 1)).all()
+    assert (low <= high).all()
+    # Os intervalos devem envolver o valor pontual da validação.
+    assert ((low <= value + 1e-9) & (value - 1e-9 <= high)).all()
+
+
+def test_rankings_are_consistent_with_results(results) -> None:
+    table = results.validation_comparison
+
+    best = table.loc[
+        (table["model"] == results.best_model) & (table["strategy"] == results.best_strategy)
+    ]
+    assert best["rank_pr_auc"].iloc[0] == 1
+    assert isinstance(results.rankings_disagree, bool)
+    assert len(results.best_by_recall) == 2
+
+    # Discordância = o vencedor por recall não é o escolhido pela PR-AUC.
+    chosen = (results.best_model, results.best_strategy)
+    assert results.rankings_disagree == (tuple(results.best_by_recall) != chosen)
+
+
+def test_primary_fpr_must_be_one_of_the_targets(df: pd.DataFrame) -> None:
+    config = ExperimentConfig(fpr_targets=(0.01,), primary_fpr=0.001, n_bootstrap=5)
+    with pytest.raises(ValueError, match="primary_fpr"):
+        run_experiment(config=config, df=df, save=False)
+
+
 def test_test_results_has_one_row_for_the_chosen_combination(results) -> None:
     test = results.test_results
 
@@ -111,6 +145,7 @@ def test_artifacts_are_written(results_and_dir) -> None:
     figures = config.reports_dir / "figures"
     for name in (
         "pr_curves_validation.png",
+        "recall_em_fpr_fixa_validacao.png",
         "custo_x_limiar_melhor_modelo.png",
         "sensibilidade_custo_melhor_modelo.png",
     ):

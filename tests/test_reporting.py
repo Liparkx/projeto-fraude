@@ -11,9 +11,25 @@ from fraud_detection.models import MODEL_NAMES, SAMPLING_STRATEGIES
 from fraud_detection.reporting import (
     plot_cost_curves,
     plot_pr_curves,
+    plot_recall_at_fpr,
     plot_sensitivity_summary,
     save_figures,
 )
+
+
+def _comparison() -> pd.DataFrame:
+    rows = []
+    rng = np.random.default_rng(1)
+    for m in MODEL_NAMES:
+        for s in SAMPLING_STRATEGIES:
+            row = {"model": m, "strategy": s}
+            for label in ("0.1pct", "1pct"):
+                value = float(rng.uniform(0.3, 0.9))
+                row[f"recall_{label}"] = value
+                row[f"recall_{label}_ci_low"] = value - 0.1
+                row[f"recall_{label}_ci_high"] = min(1.0, value + 0.1)
+            rows.append(row)
+    return pd.DataFrame(rows)
 
 
 def _data(n: int = 800, seed: int = 0):
@@ -68,7 +84,13 @@ def test_sensitivity_figure_is_written(tmp_path: Path) -> None:
     assert path.is_file() and path.stat().st_size > 0
 
 
-def test_save_figures_returns_three_existing_paths(tmp_path: Path) -> None:
+def test_recall_at_fpr_figure_is_written(tmp_path: Path) -> None:
+    path = plot_recall_at_fpr(_comparison(), (0.001, 0.01), tmp_path / "recall.png")
+
+    assert path.is_file() and path.stat().st_size > 0
+
+
+def test_save_figures_returns_four_existing_paths(tmp_path: Path) -> None:
     y, scores = _data()
     sens = pd.concat(
         [_sensitivity(m, s) for m in MODEL_NAMES for s in SAMPLING_STRATEGIES],
@@ -79,6 +101,8 @@ def test_save_figures_returns_three_existing_paths(tmp_path: Path) -> None:
         y_val=y,
         val_scores=scores,
         validation_sensitivity=sens,
+        validation_comparison=_comparison(),
+        fpr_targets=(0.001, 0.01),
         best_label="xgboost/smote",
         best_val_scores=scores["xgboost/smote"],
         cost_ratios=(1, 10, 100),
@@ -86,5 +110,5 @@ def test_save_figures_returns_three_existing_paths(tmp_path: Path) -> None:
         default_threshold=0.5,
     )
 
-    assert len(paths) == 3
+    assert len(paths) == 4
     assert all(p.is_file() for p in paths)
